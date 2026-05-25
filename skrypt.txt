@@ -1,5 +1,4 @@
 $Host.UI.RawUI.WindowTitle = "Windows Update Script"
-
 Clear-Host
 
 Write-Host "=========================================" -ForegroundColor Cyan
@@ -8,179 +7,194 @@ Write-Host "=========================================" -ForegroundColor Cyan
 Write-Host ""
 
 # --------------------------------------------------------
-# [1/12] TLS 1.2
+# Helpers
 # --------------------------------------------------------
 
-Write-Host "[1/12] Ustawianie TLS 1.2..." -ForegroundColor Yellow
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+function Write-Step($text) { Write-Host $text -ForegroundColor Yellow }
+function Write-Ok($text)   { Write-Host " $text" -ForegroundColor Green }
+function Write-Err($text)  { Write-Host " $text" -ForegroundColor Red }
+
+function Play-WindowsCompleteSound([int]$Count = 3, [int]$DelayMs = 250) {
+    try {
+        # Systemowy dźwięk Windows (bez plików .wav)
+        Add-Type -AssemblyName System.Windows.Forms | Out-Null
+
+        for ($i = 0; $i -lt $Count; $i++) {
+            [System.Windows.Forms.SystemSounds]::Asterisk.Play()
+            Start-Sleep -Milliseconds $DelayMs
+        }
+    } catch {
+        # Fallback, gdyby np. brak GUI / ograniczenia środowiska
+        for ($i = 0; $i -lt $Count; $i++) {
+            [Console]::Beep(800, 200)
+            Start-Sleep -Milliseconds $DelayMs
+        }
+    }
+}
+
+function Invoke-Winget {
+    param([Parameter(Mandatory)][string[]]$Args)
+
+    # Winget zwykle zwraca sensowne kody wyjścia — pokażmy błąd, ale nie wysadzajmy całego skryptu bez potrzeby
+    & winget @Args
+    return $LASTEXITCODE
+}
 
 # --------------------------------------------------------
-# [2/12] Aktualizacja winget source
+# MAIN
 # --------------------------------------------------------
 
-Write-Host "[2/12] Aktualizacja zrodla winget..." -ForegroundColor Yellow
+$overallExitCode = 0
 
 try {
-    Add-AppxPackage -Path "https://cdn.winget.microsoft.com/cache/source.msix"
-    Write-Host " Zrodlo winget zaktualizowane." -ForegroundColor Green
+    # [1/12] TLS 1.2
+    Write-Step "[1/12] Ustawianie TLS 1.2..."
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    Write-Ok "TLS 1.2 ustawione."
+
+    # [2/12] Aktualizacja winget source (source.msix)
+    Write-Step "[2/12] Aktualizacja zrodla winget (source.msix)..."
+    try {
+        Add-AppxPackage -Path "https://cdn.winget.microsoft.com/cache/source.msix"
+        Write-Ok "Zrodlo winget zaktualizowane."
+    }
+    catch {
+        Write-Err "Blad aktualizacji source.msix: $($_.Exception.Message)"
+        $overallExitCode = 1
+    }
+
+    # [3/12] Ustawienia winget
+    Write-Step "[3/12] Konfiguracja winget..."
+    Invoke-Winget @("settings","--enable","BypassCertificatePinningForMicrosoftStore") | Out-Null
+    Write-Ok "Ustawienia winget ustawione."
+
+    # [4/12] Aktualizacja winget source
+    Write-Step "[4/12] Aktualizacja winget source..."
+    Invoke-Winget @("source","update") | Out-Null
+
+    # [5/12] Usuwanie OpenOffice
+    Write-Step "[5/12] Usuwanie OpenOffice..."
+    Invoke-Winget @("remove","openoffice","--silent") | Out-Null
+
+    # [6/12] Instalacja aplikacji (pomijaj, jeśli już są)
+    Write-Step "[6/12] Instalacja aplikacji..."
+
+    $commonInstallArgs = @(
+        "-e",
+        "--silent",
+        "--accept-package-agreements",
+        "--accept-source-agreements"
+    )
+
+    $apps = @(
+        "Mozilla.Firefox.pl",
+        "uvncbvba.UltraVNC",
+        "TheDocumentFoundation.LibreOffice",
+        "7zip.7zip",
+        "Adobe.Acrobat.Reader.64-bit",
+        "Microsoft.Sysinternals.BGInfo"
+    )
+
+    foreach ($app in $apps) {
+        Write-Host ""
+        Write-Host "Pakiet: $app" -ForegroundColor Cyan
+
+        # "Optymalizacja": jeżeli już zainstalowane, nie próbuj instalować ponownie
+        & winget list --id $app -e | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            Write-Ok "Juz zainstalowane – pomijam."
+            continue
+        }
+
+        Write-Host "Instalowanie..." -ForegroundColor Cyan
+        Invoke-Winget @("install","--id",$app) + $commonInstallArgs | Out-Null
+    }
+
+    # [7/12] Aktualizacja wszystkich aplikacji
+    Write-Host ""
+    Write-Step "[7/12] Aktualizacja wszystkich aplikacji..."
+    Invoke-Winget @("upgrade","--all") + $commonInstallArgs | Out-Null
+
+    # [8/12] Lista dostepnych aktualizacji
+    Write-Host ""
+    Write-Step "[8/12] Lista dostepnych aktualizacji aplikacji..."
+    Invoke-Winget @("list","--upgrade-available","--include-unknown") | Out-Null
+
+    # [9/12] Sprawdzanie PSWindowsUpdate
+    Write-Host ""
+    Write-Step "[9/12] Sprawdzanie modulu PSWindowsUpdate..."
+
+    if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
+        Write-Err "Modul nie znaleziony. Instalacja..."
+
+        Install-PackageProvider -Name NuGet -Force | Out-Null
+        Install-Module PSWindowsUpdate -Force -AllowClobber | Out-Null
+
+        Write-Ok "Modul PSWindowsUpdate zainstalowany."
+    }
+    else {
+        Write-Ok "Modul juz istnieje."
+    }
+
+    # [10/12] Import modulu
+    Write-Host ""
+    Write-Step "[10/12] Importowanie modulu..."
+    Import-Module PSWindowsUpdate
+    Write-Ok "Modul zaimportowany."
+
+    # [11/12] Microsoft Update
+    Write-Host ""
+    Write-Step "[11/12] Dodawanie Microsoft Update..."
+    Add-WUServiceManager -MicrosoftUpdate -Confirm:$false | Out-Null
+    Write-Ok "Microsoft Update dodane."
+
+    # [12/12] Windows Update
+    Write-Host ""
+    Write-Step "[12/12] Wyszukiwanie aktualizacji Windows..."
+
+    $updates = Get-WindowsUpdate -MicrosoftUpdate
+
+    if (!$updates) {
+        Write-Host ""
+        Write-Ok "Brak dostepnych aktualizacji Windows."
+    }
+    else {
+        Write-Host ""
+        Write-Host " ZNALEZIONE AKTUALIZACJE:" -ForegroundColor Cyan
+        Write-Host ""
+
+        $updates | Format-Table Title
+
+        Write-Host ""
+        Write-Step "Instalowanie aktualizacji..."
+        Write-Host ""
+
+        Install-WindowsUpdate `
+            -MicrosoftUpdate `
+            -AcceptAll `
+            -AutoReboot `
+            -Verbose
+    }
+
 }
 catch {
-    Write-Host " Blad aktualizacji source.msix" -ForegroundColor Red
-}
-
-# --------------------------------------------------------
-# [3/12] Ustawienia winget
-# --------------------------------------------------------
-
-Write-Host "[3/12] Konfiguracja winget..." -ForegroundColor Yellow
-
-winget settings --enable BypassCertificatePinningForMicrosoftStore
-
-# --------------------------------------------------------
-# [4/12] Aktualizacja winget
-# --------------------------------------------------------
-
-Write-Host "[4/12] Aktualizacja winget..." -ForegroundColor Yellow
-
-winget source update
-
-# --------------------------------------------------------
-# [5/12] Usuwanie OpenOffice
-# --------------------------------------------------------
-
-Write-Host "[5/12] Usuwanie OpenOffice..." -ForegroundColor Yellow
-
-winget remove openoffice --silent
-
-# --------------------------------------------------------
-# [6/12] Instalacja aplikacji
-# --------------------------------------------------------
-
-Write-Host "[6/12] Instalacja aplikacji..." -ForegroundColor Yellow
-
-$apps = @(
-    "Mozilla.Firefox.pl",
-    "uvncbvba.UltraVNC",
-    "TheDocumentFoundation.LibreOffice",
-    "7zip.7zip",
-    "Adobe.Acrobat.Reader.64-bit",
-    "Microsoft.Sysinternals.BGInfo"
-)
-
-foreach ($app in $apps) {
-
+    $overallExitCode = 1
     Write-Host ""
-    Write-Host "Instalowanie: $app" -ForegroundColor Cyan
-
-    winget install `
-        --id $app `
-        -e `
-        --silent `
-        --accept-package-agreements `
-        --accept-source-agreements
+    Write-Err "Wystapil blad krytyczny: $($_.Exception.Message)"
 }
-
-# --------------------------------------------------------
-# [7/12] Aktualizacja wszystkich aplikacji
-# --------------------------------------------------------
-
-Write-Host ""
-Write-Host "[7/12] Aktualizacja wszystkich aplikacji..." -ForegroundColor Yellow
-
-winget upgrade --all `
-    --silent `
-    --accept-package-agreements `
-    --accept-source-agreements
-
-# --------------------------------------------------------
-# [8/12] Lista dostepnych aktualizacji
-# --------------------------------------------------------
-
-Write-Host ""
-Write-Host "[8/12] Lista dostepnych aktualizacji aplikacji..." -ForegroundColor Yellow
-
-winget list --upgrade-available --include-unknown
-
-# --------------------------------------------------------
-# [9/12] Sprawdzanie PSWindowsUpdate
-# --------------------------------------------------------
-
-Write-Host ""
-Write-Host "[9/12] Sprawdzanie modulu PSWindowsUpdate..." -ForegroundColor Yellow
-
-if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
-
-    Write-Host " Modul nie znaleziony. Instalacja..." -ForegroundColor Red
-
-    Install-PackageProvider -Name NuGet -Force | Out-Null
-    Install-Module PSWindowsUpdate -Force -AllowClobber | Out-Null
-
-    Write-Host " Modul PSWindowsUpdate zainstalowany." -ForegroundColor Green
-}
-else {
-    Write-Host " Modul juz istnieje." -ForegroundColor Green
-}
-
-# --------------------------------------------------------
-# [10/12] Import modulu
-# --------------------------------------------------------
-
-Write-Host ""
-Write-Host "[10/12] Importowanie modulu..." -ForegroundColor Yellow
-
-Import-Module PSWindowsUpdate
-
-# --------------------------------------------------------
-# [11/12] Microsoft Update
-# --------------------------------------------------------
-
-Write-Host ""
-Write-Host "[11/12] Dodawanie Microsoft Update..." -ForegroundColor Yellow
-
-Add-WUServiceManager -MicrosoftUpdate -Confirm:$false | Out-Null
-
-# --------------------------------------------------------
-# [12/12] Windows Update
-# --------------------------------------------------------
-
-Write-Host ""
-Write-Host "[12/12] Wyszukiwanie aktualizacji Windows..." -ForegroundColor Yellow
-
-$updates = Get-WindowsUpdate -MicrosoftUpdate
-
-if (!$updates) {
-
+finally {
     Write-Host ""
-    Write-Host " Brak dostepnych aktualizacji Windows." -ForegroundColor Green
-
-}
-else {
-
-    Write-Host ""
-    Write-Host " ZNALEZIONE AKTUALIZACJE:" -ForegroundColor Cyan
+    Write-Host "=========================================" -ForegroundColor Green
+    if ($overallExitCode -eq 0) {
+        Write-Host " AKTUALIZACJE ZAKONCZONE" -ForegroundColor Green
+    } else {
+        Write-Host " SKRYPT ZAKONCZONY (Z BLEDAMI)" -ForegroundColor Yellow
+    }
+    Write-Host "=========================================" -ForegroundColor Green
     Write-Host ""
 
-    $updates | Format-Table Title
+    # 3x dźwięk na koniec (zawsze)
+    Play-WindowsCompleteSound -Count 3 -DelayMs 250
 
-    Write-Host ""
-    Write-Host " Instalowanie aktualizacji..." -ForegroundColor Yellow
-    Write-Host ""
-
-    Install-WindowsUpdate `
-        -MicrosoftUpdate `
-        -AcceptAll `
-        -AutoReboot `
-        -Verbose
+    pause
 }
-
-# --------------------------------------------------------
-# KONIEC
-# --------------------------------------------------------
-
-Write-Host ""
-Write-Host "=========================================" -ForegroundColor Green
-Write-Host " AKTUALIZACJE ZAKONCZONE"
-Write-Host "=========================================" -ForegroundColor Green
-Write-Host ""
-
-pause
