@@ -107,13 +107,15 @@ try {
         }
 
         Write-Host "Instalowanie..." -ForegroundColor Cyan
-        Invoke-Winget -Args (@("install","--id",$app) + $commonInstallArgs) | Out-Null
+        $wingetArgs = @("install","--id",$app) + $commonInstallArgs
+        Invoke-Winget -Args $wingetArgs | Out-Null
     }
 
     # [7/12] Aktualizacja wszystkich aplikacji
     Write-Host ""
     Write-Step "[7/12] Aktualizacja wszystkich aplikacji..."
-    Invoke-Winget -Args (@("upgrade","--all") + $commonInstallArgs) | Out-Null
+    $wingetArgs = @("upgrade","--all") + $commonInstallArgs
+    Invoke-Winget -Args $wingetArgs | Out-Null
 
     # [8/12] Lista dostepnych aktualizacji
     Write-Host ""
