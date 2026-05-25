@@ -1,0 +1,186 @@
+$Host.UI.RawUI.WindowTitle = "Windows Update Script"
+
+Clear-Host
+
+Write-Host "=========================================" -ForegroundColor Cyan
+Write-Host " WINDOWS UPDATE + WINGET SCRIPT"
+Write-Host "=========================================" -ForegroundColor Cyan
+Write-Host ""
+
+# --------------------------------------------------------
+# [1/12] TLS 1.2
+# --------------------------------------------------------
+
+Write-Host "[1/12] Ustawianie TLS 1.2..." -ForegroundColor Yellow
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# --------------------------------------------------------
+# [2/12] Aktualizacja winget source
+# --------------------------------------------------------
+
+Write-Host "[2/12] Aktualizacja zrodla winget..." -ForegroundColor Yellow
+
+try {
+    Add-AppxPackage -Path "https://cdn.winget.microsoft.com/cache/source.msix"
+    Write-Host " Zrodlo winget zaktualizowane." -ForegroundColor Green
+}
+catch {
+    Write-Host " Blad aktualizacji source.msix" -ForegroundColor Red
+}
+
+# --------------------------------------------------------
+# [3/12] Ustawienia winget
+# --------------------------------------------------------
+
+Write-Host "[3/12] Konfiguracja winget..." -ForegroundColor Yellow
+
+winget settings --enable BypassCertificatePinningForMicrosoftStore
+
+# --------------------------------------------------------
+# [4/12] Aktualizacja winget
+# --------------------------------------------------------
+
+Write-Host "[4/12] Aktualizacja winget..." -ForegroundColor Yellow
+
+winget source update
+
+# --------------------------------------------------------
+# [5/12] Usuwanie OpenOffice
+# --------------------------------------------------------
+
+Write-Host "[5/12] Usuwanie OpenOffice..." -ForegroundColor Yellow
+
+winget remove openoffice --silent
+
+# --------------------------------------------------------
+# [6/12] Instalacja aplikacji
+# --------------------------------------------------------
+
+Write-Host "[6/12] Instalacja aplikacji..." -ForegroundColor Yellow
+
+$apps = @(
+    "Mozilla.Firefox.pl",
+    "uvncbvba.UltraVNC",
+    "TheDocumentFoundation.LibreOffice",
+    "7zip.7zip",
+    "Adobe.Acrobat.Reader.64-bit",
+    "Microsoft.Sysinternals.BGInfo"
+)
+
+foreach ($app in $apps) {
+
+    Write-Host ""
+    Write-Host "Instalowanie: $app" -ForegroundColor Cyan
+
+    winget install `
+        --id $app `
+        -e `
+        --silent `
+        --accept-package-agreements `
+        --accept-source-agreements
+}
+
+# --------------------------------------------------------
+# [7/12] Aktualizacja wszystkich aplikacji
+# --------------------------------------------------------
+
+Write-Host ""
+Write-Host "[7/12] Aktualizacja wszystkich aplikacji..." -ForegroundColor Yellow
+
+winget upgrade --all `
+    --silent `
+    --accept-package-agreements `
+    --accept-source-agreements
+
+# --------------------------------------------------------
+# [8/12] Lista dostepnych aktualizacji
+# --------------------------------------------------------
+
+Write-Host ""
+Write-Host "[8/12] Lista dostepnych aktualizacji aplikacji..." -ForegroundColor Yellow
+
+winget list --upgrade-available --include-unknown
+
+# --------------------------------------------------------
+# [9/12] Sprawdzanie PSWindowsUpdate
+# --------------------------------------------------------
+
+Write-Host ""
+Write-Host "[9/12] Sprawdzanie modulu PSWindowsUpdate..." -ForegroundColor Yellow
+
+if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
+
+    Write-Host " Modul nie znaleziony. Instalacja..." -ForegroundColor Red
+
+    Install-PackageProvider -Name NuGet -Force | Out-Null
+    Install-Module PSWindowsUpdate -Force -AllowClobber | Out-Null
+
+    Write-Host " Modul PSWindowsUpdate zainstalowany." -ForegroundColor Green
+}
+else {
+    Write-Host " Modul juz istnieje." -ForegroundColor Green
+}
+
+# --------------------------------------------------------
+# [10/12] Import modulu
+# --------------------------------------------------------
+
+Write-Host ""
+Write-Host "[10/12] Importowanie modulu..." -ForegroundColor Yellow
+
+Import-Module PSWindowsUpdate
+
+# --------------------------------------------------------
+# [11/12] Microsoft Update
+# --------------------------------------------------------
+
+Write-Host ""
+Write-Host "[11/12] Dodawanie Microsoft Update..." -ForegroundColor Yellow
+
+Add-WUServiceManager -MicrosoftUpdate -Confirm:$false | Out-Null
+
+# --------------------------------------------------------
+# [12/12] Windows Update
+# --------------------------------------------------------
+
+Write-Host ""
+Write-Host "[12/12] Wyszukiwanie aktualizacji Windows..." -ForegroundColor Yellow
+
+$updates = Get-WindowsUpdate -MicrosoftUpdate
+
+if (!$updates) {
+
+    Write-Host ""
+    Write-Host " Brak dostepnych aktualizacji Windows." -ForegroundColor Green
+
+}
+else {
+
+    Write-Host ""
+    Write-Host " ZNALEZIONE AKTUALIZACJE:" -ForegroundColor Cyan
+    Write-Host ""
+
+    $updates | Format-Table Title
+
+    Write-Host ""
+    Write-Host " Instalowanie aktualizacji..." -ForegroundColor Yellow
+    Write-Host ""
+
+    Install-WindowsUpdate `
+        -MicrosoftUpdate `
+        -AcceptAll `
+        -AutoReboot `
+        -Verbose
+}
+
+# --------------------------------------------------------
+# KONIEC
+# --------------------------------------------------------
+
+Write-Host ""
+Write-Host "=========================================" -ForegroundColor Green
+Write-Host " AKTUALIZACJE ZAKONCZONE"
+Write-Host "=========================================" -ForegroundColor Green
+Write-Host ""
+
+pause
