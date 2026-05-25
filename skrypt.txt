@@ -11,8 +11,8 @@ Write-Host ""
 # --------------------------------------------------------
 
 function Write-Step($text) { Write-Host $text -ForegroundColor Yellow }
-function Write-Ok($text)   { Write-Host " $text" -ForegroundColor Green }
-function Write-Err($text)  { Write-Host " $text" -ForegroundColor Red }
+function Write-Ok($text)   { Write-Host "✅ $text" -ForegroundColor Green }
+function Write-Err($text)  { Write-Host "❌ $text" -ForegroundColor Red }
 
 function Play-WindowsCompleteSound([int]$Count = 3, [int]$DelayMs = 250) {
     try {
@@ -65,16 +65,16 @@ try {
 
     # [3/12] Ustawienia winget
     Write-Step "[3/12] Konfiguracja winget..."
-    Invoke-Winget @("settings","--enable","BypassCertificatePinningForMicrosoftStore") | Out-Null
+    Invoke-Winget -Args @("settings","--enable","BypassCertificatePinningForMicrosoftStore") | Out-Null
     Write-Ok "Ustawienia winget ustawione."
 
     # [4/12] Aktualizacja winget source
     Write-Step "[4/12] Aktualizacja winget source..."
-    Invoke-Winget @("source","update") | Out-Null
+    Invoke-Winget -Args @("source","update") | Out-Null
 
     # [5/12] Usuwanie OpenOffice
     Write-Step "[5/12] Usuwanie OpenOffice..."
-    Invoke-Winget @("remove","openoffice","--silent") | Out-Null
+    Invoke-Winget -Args @("remove","openoffice","--silent") | Out-Null
 
     # [6/12] Instalacja aplikacji (pomijaj, jeśli już są)
     Write-Step "[6/12] Instalacja aplikacji..."
@@ -107,18 +107,18 @@ try {
         }
 
         Write-Host "Instalowanie..." -ForegroundColor Cyan
-        Invoke-Winget @("install","--id",$app) + $commonInstallArgs | Out-Null
+        Invoke-Winget -Args (@("install","--id",$app) + $commonInstallArgs) | Out-Null
     }
 
     # [7/12] Aktualizacja wszystkich aplikacji
     Write-Host ""
     Write-Step "[7/12] Aktualizacja wszystkich aplikacji..."
-    Invoke-Winget @("upgrade","--all") + $commonInstallArgs | Out-Null
+    Invoke-Winget -Args (@("upgrade","--all") + $commonInstallArgs) | Out-Null
 
     # [8/12] Lista dostepnych aktualizacji
     Write-Host ""
     Write-Step "[8/12] Lista dostepnych aktualizacji aplikacji..."
-    Invoke-Winget @("list","--upgrade-available","--include-unknown") | Out-Null
+    Invoke-Winget -Args @("list","--upgrade-available","--include-unknown") | Out-Null
 
     # [9/12] Sprawdzanie PSWindowsUpdate
     Write-Host ""
